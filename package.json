@@ -1,0 +1,45 @@
+{
+  "name": "@wavyapp/react-native-zendesk",
+  "version": "0.0.1",
+  "description": "React native module that implements unified Zendesk SDK",
+  "main": "lib/commonjs/index.js",
+  "repository": "git@github.com:wavyapp/react-native-zendesk.git",
+  "author": "Sébastien Vray <sebastien.vray@treatwell.com>",
+  "license": "MIT",
+  "private": true,
+  "packageManager": "yarn@4.3.1",
+  "react-native-builder-bob": {
+    "source": "src",
+    "output": "lib",
+    "targets": [
+      "commonjs",
+      "module",
+      "typescript"
+    ]
+  },
+  "devDependencies": {
+    "react-native": "^0.74.3",
+    "react-native-builder-bob": "^0.23.2",
+    "typescript": "^5.5.3"
+  },
+  "react-native": "src/index.ts",
+  "source": "src/index.ts",
+  "module": "lib/module/index.js",
+  "types": "lib/typescript/src/index.d.ts",
+  "scripts": {
+    "prepare": "bob build"
+  },
+  "files": [
+    "android",
+    "ios",
+    "src",
+    "lib",
+    "!**/__tests__",
+    "!**/__fixtures__",
+    "!**/__mocks__"
+  ],
+  "eslintIgnore": [
+    "node_modules/",
+    "lib/"
+  ]
+}

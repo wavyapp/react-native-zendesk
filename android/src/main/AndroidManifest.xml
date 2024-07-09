@@ -1,0 +1,13 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application>
+        <service
+            android:name="fr.wavyapp.reactNativeZendesk.PushListenerService"
+            android:exported="true"
+            android:permission="android.permission.POST_NOTIFICATIONS"
+            >
+            <intent-filter>
+                <action android:name="com.google.firebase.MESSAGING_EVENT" />
+            </intent-filter>
+        </service>
+    </application>
+</manifest>
