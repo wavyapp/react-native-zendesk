@@ -18,6 +18,7 @@ class ReactNativeZendeskPackage : ReactPackage {
     context: ReactApplicationContext
   ): MutableList<NativeModule> = listOf(ReactNativeZendeskModule(context, firebaseMessagingToken)).toMutableList()
 
+  @Suppress("unused")
   fun setFirebaseMessagingToken(token: String?) {
     if (token != null) {
       firebaseMessagingToken = token

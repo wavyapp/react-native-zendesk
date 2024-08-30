@@ -1,4 +1,4 @@
-import { /*NativeEventEmitter, */NativeModules, Platform } from 'react-native';
+import { NativeEventEmitter, NativeModules, Platform } from 'react-native';
 
 const LINKING_ERROR =
   `The package 'react-native-zendesk' doesn't seem to be linked. Make sure: \n\n` +
@@ -15,6 +15,8 @@ const ReactNativeZendesk = NativeModules.ReactNativeZendesk
       },
     }
   );
+
+const _nativeEventEmitter = new NativeEventEmitter(ReactNativeZendesk);
 
 export type InitOptions = {
   zendeskUrl: string;
@@ -41,6 +43,10 @@ export type ChatOptions = {
   enableOfflineForm?: Boolean;
 };
 
+export enum ZendeskEvent {
+  RECEIVED_MESSAGE = "zendeskChatReceivedMessage"
+}
+
 export function initialize(opts: InitOptions): Promise<Boolean> {
   return ReactNativeZendesk.initialize(opts.zendeskUrl, opts.appId, opts.clientId, opts.chatAppId || null, opts.chatAccountKey || null);
 }
@@ -54,4 +60,8 @@ export function openChat(
   chatOpts: ChatOptions | null = null,
 ): Promise<Boolean> {
   return ReactNativeZendesk.openChat(visitorInfo, chatOpts);
+}
+
+export function addEventListener(event: ZendeskEvent, callback: (data?: Record<string, unknown>) => void) {
+  return _nativeEventEmitter.addListener(event, callback)
 }

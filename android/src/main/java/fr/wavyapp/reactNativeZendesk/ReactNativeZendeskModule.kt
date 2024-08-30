@@ -6,6 +6,8 @@ import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.ReactContextBaseJavaModule
 import com.facebook.react.bridge.ReactMethod
 import com.facebook.react.bridge.ReadableMap
+import com.facebook.react.bridge.WritableNativeMap
+import com.facebook.react.modules.core.DeviceEventManagerModule
 import com.zendesk.service.ErrorResponse
 import com.zendesk.service.ZendeskCallback
 import kotlinx.coroutines.CoroutineScope
@@ -15,6 +17,7 @@ import kotlinx.coroutines.launch
 import zendesk.chat.Chat
 import zendesk.chat.ChatConfiguration
 import zendesk.chat.ChatEngine
+import zendesk.chat.PushData
 import zendesk.chat.VisitorInfo
 import zendesk.classic.messaging.MessagingActivity
 import zendesk.core.AnonymousIdentity
@@ -24,8 +27,39 @@ import zendesk.support.Support
 class ReactNativeZendeskModule(reactContext: ReactApplicationContext, private val firebaseMessagingToken: String?) : ReactContextBaseJavaModule(reactContext) {
   private var isInit = false
   private val zendeskCoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+  private var listeners = 0
+
+  override fun initialize() {
+    super.initialize()
+    EventsEmitter.instance.subscribe("chatReceivedMessage") {
+      (it as? PushData)?.let { messageData ->
+        val nativeMap = WritableNativeMap()
+
+        nativeMap.putString("agentName", messageData.author)
+        nativeMap.putString("message", messageData.message)
+        sendEvent("zendeskChatReceivedMessage", nativeMap)
+      }
+    }
+  }
+
   override fun getName(): String {
     return "ReactNativeZendesk"
+  }
+
+  @Suppress("unused", "UNUSED_PARAMETER")
+  @ReactMethod
+  fun addListener(eventName: String) {
+    listeners++
+  }
+
+  @Suppress("unused")
+  @ReactMethod
+  fun removeListeners(count: Int) {
+    if (listeners > 1) {
+      listeners -= count
+    } else {
+      listeners = 0
+    }
   }
 
   @Suppress("unused")
@@ -59,7 +93,7 @@ class ReactNativeZendeskModule(reactContext: ReactApplicationContext, private va
   @ReactMethod
   fun identifyUser(identityTraits: ReadableMap, promise: Promise) {
     if (!isInit) {
-      promise.reject("OPEN_CHAT_MUST_INIT_SDK", "Call the initChat method first", null)
+      promise.reject("IDENTIFY_USER_MUST_INIT_SDK", "Call the initialize method first", null)
     }
     val identity = AnonymousIdentity.Builder()
 
@@ -147,5 +181,13 @@ class ReactNativeZendeskModule(reactContext: ReactApplicationContext, private va
     intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK
     reactApplicationContext.startActivity(intent)
     promise.resolve(true)
+  }
+
+  private fun sendEvent(name: String, body: Any? = null) {
+    if (listeners > 0) {
+      reactApplicationContext
+        .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
+        .emit(name, body)
+    }
   }
 }

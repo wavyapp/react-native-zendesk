@@ -1,8 +1,8 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <application>
         <service
-            android:name="fr.wavyapp.reactNativeZendesk.PushListenerService"
-            android:exported="true"
+            android:name=".PushListenerService"
+            android:exported="false"
             android:permission="android.permission.POST_NOTIFICATIONS"
             >
             <intent-filter>

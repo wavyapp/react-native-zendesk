@@ -10,10 +10,13 @@ import androidx.core.app.NotificationCompat
 import com.google.firebase.messaging.FirebaseMessagingService
 import com.google.firebase.messaging.RemoteMessage
 import zendesk.chat.Chat
+import zendesk.chat.ChatConfiguration
+import zendesk.chat.ChatEngine
 import zendesk.chat.PushData
 import zendesk.classic.messaging.MessagingActivity
 
-class PushListenerService : FirebaseMessagingService() {
+class PushListenerService() : FirebaseMessagingService() {
+
   override fun onMessageReceived(remoteMessage: RemoteMessage) {
     super.onMessageReceived(remoteMessage)
     val manager = getSystemService(NOTIFICATION_SERVICE) as NotificationManager?
@@ -32,15 +35,24 @@ class PushListenerService : FirebaseMessagingService() {
 
         channel.enableVibration(true)
         channel.vibrationPattern = longArrayOf(100, 200, 100, 200)
-
         builder.setChannelId(NOTIFICATION_CHANNEL_ID)
+
+        val chatConfig = ChatConfiguration.builder()
+        chatConfig.withPreChatFormEnabled(false)
+
+        val intent = MessagingActivity.builder().withEngines(ChatEngine.engine()).intent(
+          applicationContext,
+          chatConfig.build()
+        )
+        intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK
 
         val contentIntent = PendingIntent.getActivity(
           this,
           0,
-          Intent(this, MessagingActivity::class.java),
+          intent,
           PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
+
         builder.setContentIntent(contentIntent)
         manager.createNotificationChannel(channel)
       }
@@ -54,16 +66,14 @@ class PushListenerService : FirebaseMessagingService() {
         }
 
         PushData.Type.MESSAGE -> {
-          builder.setContentTitle("Chat message")
-          builder.setContentText("New chat message!")
+          builder.setContentTitle(pushData.author)
+          builder.setContentText(pushData.message)
+          EventsEmitter.instance.dispatchEvent("chatReceivedMessage", pushData)
         }
 
         else -> return
       }
       manager.notify(NOTIFICATION_ID, builder.build())
-
-      // IMPORTANT! forward the notification data to the SDK
-      //ZopimChatApi.onMessageReceived(pushData)
     } ?: {
       Log.d(LOG_TAG, "Notification manager not found")
     }
@@ -74,7 +84,7 @@ class PushListenerService : FirebaseMessagingService() {
 
     private val NOTIFICATION_ID = System.currentTimeMillis().toInt()
 
-    private const val NOTIFICATION_CHANNEL_ID = "ChatSampleAppChannelId"
-    private const val NOTIFICATION_CHANNEL_NAME = "ChatSampleAppChannelId"
+    private const val NOTIFICATION_CHANNEL_ID = "ZendeskChat"
+    private const val NOTIFICATION_CHANNEL_NAME = "Zendesk chat notifications"
   }
 }

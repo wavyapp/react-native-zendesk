@@ -32,6 +32,7 @@
   "files": [
     "android",
     "ios",
+    "ReactNativeZendesk.podspec",
     "src",
     "lib",
     "!**/__tests__",
