@@ -1,13 +1,12 @@
-import ChatSDK
-import ChatProvidersSDK
-import MessagingSDK
-import ZendeskCoreSDK
+import ZendeskSDK
+import ZendeskSDKMessaging
 import UserNotifications
 
 @objc(ReactNativeZendesk)
-class ReactNativeZendesk: RCTEventEmitter, UNUserNotificationCenterDelegate {
+class ReactNativeZendesk: RCTEventEmitter, UNUserNotificationCenterDelegate, UIAdaptivePresentationControllerDelegate {
   var isInit = false
-  
+  var hasEventListeners = false
+
   override init() {
     super.init()
     let notificationCenter = UNUserNotificationCenter.current()
@@ -19,138 +18,232 @@ class ReactNativeZendesk: RCTEventEmitter, UNUserNotificationCenterDelegate {
       }
     }
   }
-  
+
+  override func startObserving() {
+    self.hasEventListeners = true
+  }
+
+  override func stopObserving() {
+    self.hasEventListeners = false
+  }
+
+  override func sendEvent(withName name: String!, body: Any!) {
+    if (self.hasEventListeners) {
+      super.sendEvent(withName: name, body: body)
+    }
+  }
+
   override func supportedEvents() -> [String]!
   {
     return [
-      "zendeskChatReceivedMessage",
+      "zendeskMessagingAuthenticationFailed",
+      "zendeskMessagingConversationAdded",
+      "zendeskMessagingConnectionStatusChanged",
+      "zendeskMessagingReceivedMessage",
+      "zendeskMessagingSendMessageFailed",
+      "zendeskMessagingUnreadCountChanged",
+      "zendeskMessagingClosed",
+      "zendeskMessagingOpened",
     ]
   }
-  
-  func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification, withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
+
+  func userNotificationCenter(
+    _ center: UNUserNotificationCenter,
+    willPresent notification: UNNotification,
+    withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
+  ) {
     let userInfo = notification.request.content.userInfo
-    let application = UIApplication.shared
-    Chat.didReceiveRemoteNotification(userInfo, in: application)
-    
-    if
-      let notificationData = userInfo["data"] as? NSDictionary,
-      let notificationType = notificationData["type"] as? String,
-      notificationType == "zd.chat.msg",
-      let aps = userInfo["aps"] as? NSDictionary,
-      let alert = aps["alert"] as? NSDictionary,
-      let agentName = alert["title"] as? String,
-      let message = alert["body"] as? String
-    {
-      sendEvent(withName: "zendeskChatReceivedMessage", body: ["message": message, "agentName": agentName])
-    }
-    completionHandler([.alert, .sound, .badge])
-  }
-  
-  func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) {
-    Swift.print(response.actionIdentifier)
-  }
-  
-  @objc
-  func initialize(
-    _ zendeskUrl: String,
-    appId: String,
-    clientId: String,
-    chatAppId: String?,
-    chatAccountKey: String?,
-    resolver resolve: @escaping RCTPromiseResolveBlock,
-    rejecter reject: @escaping RCTPromiseRejectBlock
-  ) {
-    Zendesk.initialize(appId: appId, clientId: clientId, zendeskUrl: zendeskUrl)
-    
-    if let chatAppIdNotNil = chatAppId, let chatAccountKeyNotNil = chatAccountKey {
-      Chat.initialize(accountKey: chatAccountKeyNotNil, appId: chatAppIdNotNil)
-    }
-    
-    isInit = true
-    resolve(true)
-  }
-  
-  @objc
-  func identifyUser(
-    _ identityTraits: [String:Any],
-    resolver resolve: @escaping RCTPromiseResolveBlock,
-    rejecter reject: @escaping RCTPromiseRejectBlock
-  ) {
-    guard isInit else {
-      return reject("IDENTIFY_USER_MUST_INIT_SDK", "Call the initialize method first", nil)
-    }
-    
-    let identity = Identity.createAnonymous(
-      name: identityTraits["name"] as? String,
-      email: identityTraits["email"] as? String
-    )
-    
-    Zendesk.instance?.setIdentity(identity)
-    resolve(true)
-  }
-  
-  @objc
-  func openChat(
-    _ userInfos: [String:Any]?,
-    chatOpts: [String:Any]?,
-    resolver resolve: @escaping RCTPromiseResolveBlock,
-    rejecter reject: @escaping RCTPromiseRejectBlock
-  ) {
-    guard isInit else {
-      return reject("OPEN_CHAT_MUST_INIT_SDK", "Call the initialize method first", nil)
-    }
-    let messagingConfig = MessagingConfiguration()
-    let chatConfig = ChatConfiguration()
-    
-    if let notNilChatOpts = chatOpts {
-      if let enableAgentAvailability = notNilChatOpts["enableAgentAvailability"] as? Bool {
-        chatConfig.isAgentAvailabilityEnabled = enableAgentAvailability
-      }
-      if let enablePreChatForm = notNilChatOpts["enablePreChatForm"] as? Bool {
-        chatConfig.isPreChatFormEnabled = enablePreChatForm
-      }
-      if let enableTranscript = notNilChatOpts["enableTranscript"] as? Bool {
-        chatConfig.isChatTranscriptPromptEnabled = enableTranscript
-      }
-      if let enableOfflineForm = notNilChatOpts["enableOfflineForm"] as? Bool {
-        chatConfig.isOfflineFormEnabled = enableOfflineForm
-      }
-    }
-    
-    if let notNilUserInfos = userInfos {
-      let visitorInfo = VisitorInfo(
-        name: notNilUserInfos["name"] as? String ?? "",
-        email: notNilUserInfos["email"] as? String ?? "",
-        phoneNumber: notNilUserInfos["phone"] as? String ?? ""
-      )
-      Chat.profileProvider?.setVisitorInfo(visitorInfo) { result in
-        switch result {
-          case .failure(let error):
-            reject("OPEN_CHAT_FAILED_TO_SET_VISITOR_INFO", error.localizedDescription, error)
-          default:
-            break
+    let shouldBeDisplayed = PushNotifications.shouldBeDisplayed(userInfo)
+
+    switch shouldBeDisplayed {
+      case .messagingShouldDisplay:
+        if
+          let message = userInfo["message"] as? Dictionary<AnyHashable, AnyHashable>,
+          let agentName = message["name"] as? String,
+          let content = message["text"] as? String
+        {
+          sendEvent(withName: "zendeskMessagingReceivedMessage", body: ["message": content, "agentName": agentName])
         }
+        // This push belongs to Messaging and the SDK is able to display it to the end user
+        if #available(iOS 14.0, *) {
+          completionHandler([.banner, .sound, .badge])
+        } else {
+          completionHandler([.alert, .sound, .badge])
+        }
+      case .messagingShouldNotDisplay:
+        // This push belongs to Messaging but it should not be displayed to the end user
+        completionHandler([])
+      case .notFromMessaging:
+        // This push does not belong to Messaging
+        // If not, just call the `completionHandler`
+        completionHandler([.alert, .sound, .badge])
+      @unknown default: break
+    }
+  }
+
+  func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse, withCompletionHandler completionHandler: @escaping () -> Void) {
+    let shouldBeDisplayed = PushNotifications.shouldBeDisplayed(response.notification.request.content.userInfo)
+
+    switch shouldBeDisplayed {
+      case .messagingShouldDisplay:
+        PushNotifications.handleTap(response.notification.request.content.userInfo) { viewController in
+          DispatchQueue.main.async {
+            guard let presentedVc = RCTPresentedViewController() else {
+              return
+            }
+            guard let notNilViewController = viewController else {
+              return
+            }
+            notNilViewController.presentationController?.delegate = self
+            presentedVc.present(notNilViewController, animated: true) {
+              self.sendEvent(withName: "zendeskMessagingOpened", body: nil)
+            }
+          }
+        }
+      default: break
+    }
+    completionHandler()
+  }
+
+  func presentationControllerDidDismiss(_ presentationController: UIPresentationController) {
+    self.sendEvent(withName: "zendeskMessagingClosed", body: nil)
+  }
+
+  func presentationControllerShouldDismiss(_ presentationController: UIPresentationController) -> Bool {
+    return true
+  }
+
+  func addZendeskEventsObservers() {
+    Zendesk.instance?.addEventObserver(self) { event in
+      switch event {
+        case .unreadMessageCountChanged(let unreadCount):
+          self.sendEvent(withName: "zendeskMessagingUnreadCountChanged", body: unreadCount)
+        case .authenticationFailed(let error as NSError):
+          self.sendEvent(withName: "zendeskMessagingAuthenticationFailed", body: error.localizedDescription)
+        case .conversationAdded(conversationId: let conversationId):
+          self.sendEvent(withName: "zendeskMessagingConversationAdded", body: conversationId)
+        case .connectionStatusChanged(connectionStatus: let connectionStatus):
+          self.sendEvent(withName: "zendeskMessagingConnectionStatusChanged", body: connectionStatus)
+        case .sendMessageFailed(let error as NSError):
+          self.sendEvent(withName: "zendeskMessagingSendMessageFailed", body: error.localizedDescription)
+        @unknown default:
+          break
       }
-      if let tags = notNilUserInfos["tags"] as? [String] {
-        Chat.profileProvider?.addTags(tags)
+    }
+
+  }
+
+  @objc
+  func initializeSDK(
+    _ channelKey: String,
+    resolver resolve: @escaping RCTPromiseResolveBlock,
+    rejecter reject: @escaping RCTPromiseRejectBlock
+  ) {
+    Zendesk.initialize(withChannelKey: channelKey,messagingFactory: DefaultMessagingFactory()) { result in
+      if case let .failure(error) = result {
+        reject("FAILED_TO_INIT_MESSAGING_SDK", error.localizedDescription, nil)
+      } else {
+        self.isInit = true
+        self.addZendeskEventsObservers()
+        resolve(true)
+      }
+    }
+  }
+
+  @objc
+  func logUserIn(
+    _ JWT: String,
+    resolver resolve: @escaping RCTPromiseResolveBlock,
+    rejecter reject: @escaping RCTPromiseRejectBlock
+  ) {
+    guard isInit else {
+      return reject("LOG_USER_IN_MUST_INIT_SDK", "Call the initialize method first", nil)
+    }
+    Zendesk.instance?.loginUser(with: JWT) { result in
+      switch result {
+        case .success(let user):
+          resolve([
+            "id": user.id,
+            "externalId": user.externalId,
+          ]);
+        case .failure(let error):
+          reject("LOGIN_USER_IN_FAILURE", error.localizedDescription, nil)
+      }
+    }
+  }
+
+  @objc
+  func logUserOut(
+    _ resolve: @escaping RCTPromiseResolveBlock,
+    rejecter reject: @escaping RCTPromiseRejectBlock
+  ) {
+    guard isInit else {
+      return reject("LOG_USER_OUT_MUST_INIT_SDK", "Call the initialize method first", nil)
+    }
+    Zendesk.instance?.logoutUser { result in
+      switch result {
+        case .success():
+          resolve(true);
+        case .failure(let error):
+          reject("LOGIN_USER_OUT_FAILURE", error.localizedDescription, nil)
+      }
+    }
+  }
+
+  @objc
+  func close(
+    _ resolve: @escaping RCTPromiseResolveBlock,
+    rejecter reject: @escaping RCTPromiseRejectBlock
+  ) {
+    DispatchQueue.main.async {
+      guard let presentedVc = RCTPresentedViewController() else {
+        return reject("CLOSE_CANNOT_RETRIEVE_VC", "Could not retrieve the presented view controller", nil)
+      }
+      presentedVc.dismiss(animated: true) {
+        self.sendEvent(withName: "zendeskMessagingClosed", body: nil)
+        resolve(true)
+      }
+    }
+  }
+
+  @objc
+  func open(
+    _ metadata: [String:Any]?,
+    resolver resolve: @escaping RCTPromiseResolveBlock,
+    rejecter reject: @escaping RCTPromiseRejectBlock
+  ) {
+    guard isInit else {
+      return reject("OPEN_MUST_INIT_SDK", "Call the initialize method first", nil)
+    }
+
+    if let notNilMetadata = metadata {
+      if let tags = notNilMetadata["tags"] as? [String] {
+        Zendesk.instance?.messaging?.setConversationTags(tags)
+      }
+      if let conversationFields = notNilMetadata["fields"] as? [[String: AnyHashable]] {
+        let conversationFieldsFormatIsValid = conversationFields.allSatisfy { fieldData in fieldData["id"] is String && fieldData["value"] != nil }
+
+        guard conversationFieldsFormatIsValid else {
+          return reject("OPEN_MUST_MALFORMED_CONVERSATION_FIELDS", "`fields` parameter should be of the form [{ id: string, value: String | number | boolean}]", nil)
+        }
+        let conversationFieldsDict = Dictionary(
+          conversationFields.map { fieldData in (fieldData["id"] as! String, fieldData["value"]!)},
+          uniquingKeysWith: { (_, last) in last }
+        )
+        Zendesk.instance?.messaging?.setConversationFields(conversationFieldsDict)
       }
     }
     DispatchQueue.main.async {
-      do {
-        guard let presentedVc = RCTPresentedViewController() else {
-          return reject("OPEN_CHAT_CANNOT_RETRIEVE_VC", "Could not retrieve the presented view controller", nil)
-        }
-        let chatEngine = try ChatEngine.engine()
-        let navigationController = UINavigationController()
-        let chatViewController = try Messaging.instance.buildUI(engines: [chatEngine], configs: [chatConfig, messagingConfig])
-        navigationController.pushViewController(chatViewController, animated: true)
-        presentedVc.present(navigationController, animated: true) {
-          resolve(true)
-        }
-      } catch ChatError.chatIsNotInitialized {
-        reject("OPEN_CHAT_MUST_INIT_CHAT", "Call the initialize method with appropriate parameters to initialize the chat first", nil)
-      } catch {
-        reject("OPEN_CHAT_UNKNOWN_ERROR", "Unknown error while trying to open the chat", error)
+      guard let presentedVc = RCTPresentedViewController() else {
+        return reject("OPEN_CANNOT_RETRIEVE_VC", "Could not retrieve the presented view controller", nil)
+      }
+      guard let messagingViewController = Zendesk.instance?.messaging?.messagingViewController() else {
+        return reject("OPEN_CANNOT_MESSAGING_VC", "Could not retrieve zendesk messaging view controller", nil)
+      }
+      messagingViewController.presentationController?.delegate = self
+      presentedVc.present(messagingViewController, animated: true) {
+        self.sendEvent(withName: "zendeskMessagingOpened", body: nil)
+        resolve(true)
       }
     }
   }

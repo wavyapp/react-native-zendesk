@@ -3,9 +3,8 @@
         <service
             android:name=".PushListenerService"
             android:exported="false"
-            android:permission="android.permission.POST_NOTIFICATIONS"
             >
-            <intent-filter>
+            <intent-filter android:priority="10">
                 <action android:name="com.google.firebase.MESSAGING_EVENT" />
             </intent-filter>
         </service>

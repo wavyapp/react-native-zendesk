@@ -1,45 +1,79 @@
 package fr.wavyapp.reactNativeZendesk
 
-import android.content.Intent
+import android.app.Activity
+import android.app.Application
+import android.content.Intent.FLAG_ACTIVITY_NEW_TASK
+import android.os.Bundle
 import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.ReactContextBaseJavaModule
 import com.facebook.react.bridge.ReactMethod
 import com.facebook.react.bridge.ReadableMap
-import com.facebook.react.bridge.WritableNativeMap
 import com.facebook.react.modules.core.DeviceEventManagerModule
-import com.zendesk.service.ErrorResponse
-import com.zendesk.service.ZendeskCallback
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
-import zendesk.chat.Chat
-import zendesk.chat.ChatConfiguration
-import zendesk.chat.ChatEngine
-import zendesk.chat.PushData
-import zendesk.chat.VisitorInfo
-import zendesk.classic.messaging.MessagingActivity
-import zendesk.core.AnonymousIdentity
-import zendesk.core.Zendesk
-import zendesk.support.Support
+import zendesk.android.Zendesk
+import zendesk.android.ZendeskResult
+import zendesk.android.events.ZendeskEvent
+import zendesk.android.events.ZendeskEventListener
+import zendesk.messaging.android.DefaultMessagingFactory
 
-class ReactNativeZendeskModule(reactContext: ReactApplicationContext, private val firebaseMessagingToken: String?) : ReactContextBaseJavaModule(reactContext) {
+class ReactNativeZendeskModule(private val reactContext: ReactApplicationContext) : ReactContextBaseJavaModule(reactContext) {
   private var isInit = false
   private val zendeskCoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
   private var listeners = 0
 
   override fun initialize() {
     super.initialize()
-    EventsEmitter.instance.subscribe("chatReceivedMessage") {
-      (it as? PushData)?.let { messageData ->
-        val nativeMap = WritableNativeMap()
 
-        nativeMap.putString("agentName", messageData.author)
-        nativeMap.putString("message", messageData.message)
-        sendEvent("zendeskChatReceivedMessage", nativeMap)
+    reactApplicationContext.currentActivity?.application?.registerActivityLifecycleCallbacks(object: Application.ActivityLifecycleCallbacks {
+      override fun onActivityPaused(activity: Activity) {
+      }
+
+      override fun onActivityStarted(activity: Activity) {
+        if (activity.localClassName == "zendesk.messaging.android.internal.conversationscreen.ConversationActivity") {
+          sendEvent("zendeskMessagingOpened")
+        }
+      }
+
+      override fun onActivityDestroyed(activity: Activity) {
+        // noop
+      }
+
+      override fun onActivitySaveInstanceState(activity: Activity, p1: Bundle) {
+        // noop
+      }
+
+      override fun onActivityStopped(activity: Activity) {
+        if (activity.localClassName == "zendesk.messaging.android.internal.conversationscreen.ConversationActivity") {
+          sendEvent("zendeskMessagingClosed")
+        }
+      }
+
+      override fun onActivityCreated(activity: Activity, p1: Bundle?) {
+        // noop
+      }
+
+      override fun onActivityResumed(activity: Activity) {
+        // noop
+      }
+    })
+  }
+
+  private fun addZendeskEventsObservers() {
+    val eventListener = ZendeskEventListener {
+      event -> when (event) {
+        is ZendeskEvent.AuthenticationFailed -> sendEvent("zendeskMessagingAuthenticationFailed")
+        is ZendeskEvent.ConversationAdded -> sendEvent("zendeskMessagingConversationAdded")
+        is ZendeskEvent.ConnectionStatusChanged -> sendEvent("zendeskMessagingConnectionStatusChanged")
+        is ZendeskEvent.FieldValidationFailed -> {}
+        is ZendeskEvent.SendMessageFailed -> sendEvent("zendeskMessagingSendMessageFailed")
+        is ZendeskEvent.UnreadMessageCountChanged -> sendEvent("zendeskMessagingUnreadCountChanged", event.currentUnreadCount)
       }
     }
+    Zendesk.instance.addEventListener(eventListener)
   }
 
   override fun getName(): String {
@@ -64,122 +98,95 @@ class ReactNativeZendeskModule(reactContext: ReactApplicationContext, private va
 
   @Suppress("unused")
   @ReactMethod
-  fun initialize(
-    zendeskUrl: String,
-    appId: String,
-    clientId: String,
-    chatAppId: String?,
-    chatAccountKey: String?,
+  fun initializeSDK(
+    channelKey: String,
     promise: Promise
   ) {
     zendeskCoroutineScope.launch {
-      Zendesk.INSTANCE.init(reactApplicationContext, zendeskUrl, appId, clientId)
-      Support.INSTANCE.init(Zendesk.INSTANCE)
+      val init = Zendesk.initialize(
+        context = reactApplicationContext,
+        channelKey = channelKey,
+        messagingFactory = DefaultMessagingFactory(),
+      )
 
-      if (chatAppId != null && chatAccountKey != null) {
-        Chat.INSTANCE.init(reactApplicationContext, chatAccountKey, chatAppId)
-        firebaseMessagingToken?.let {
-          Chat.INSTANCE.providers()?.
-            pushNotificationsProvider()?.
-            registerPushToken(firebaseMessagingToken)
+      when (init) {
+        is ZendeskResult.Success -> {
+          isInit = true
+          addZendeskEventsObservers()
+          promise.resolve(true)
         }
+        is ZendeskResult.Failure -> promise.reject("FAILED_TO_INIT_MESSAGING_SDK", init.error)
       }
-      isInit = true
-      promise.resolve(true)
     }
   }
 
   @Suppress("unused")
   @ReactMethod
-  fun identifyUser(identityTraits: ReadableMap, promise: Promise) {
+  fun logUserIn(JWT: String, promise: Promise) {
     if (!isInit) {
-      promise.reject("IDENTIFY_USER_MUST_INIT_SDK", "Call the initialize method first", null)
+      promise.reject("LOG_USER_IN_MUST_INIT_SDK", "Call the initialize method first", null)
     }
-    val identity = AnonymousIdentity.Builder()
 
-    identityTraits.getString("name")?.let { identity.withNameIdentifier(it) }
-    identityTraits.getString("email")?.let { identity.withEmailIdentifier(it) }
+    zendeskCoroutineScope.launch {
+      when (val loginResult = Zendesk.instance.loginUser(JWT)) {
+        is ZendeskResult.Success -> promise.resolve(true)
+        is ZendeskResult.Failure -> promise.reject("LOGIN_USER_IN_FAILURE", loginResult.error)
+      }
+    }
+  }
 
-    Zendesk.INSTANCE.setIdentity(identity.build())
+  @Suppress("unused")
+  @ReactMethod
+  fun logUserOut(promise: Promise) {
+    if (!isInit) {
+      promise.reject("LOG_USER_OUT_MUST_INIT_SDK", "Call the initialize method first", null)
+    }
+
+    zendeskCoroutineScope.launch {
+      when (val logoutResult = Zendesk.instance.logoutUser()) {
+        is ZendeskResult.Success -> promise.resolve(true)
+        is ZendeskResult.Failure -> promise.reject("LOGIN_USER_OUT_FAILURE", logoutResult.error)
+      }
+    }
+  }
+
+  @Suppress("unused")
+  @ReactMethod
+  fun close(promise: Promise) {
+    // Just resolve the promise without doing anything since when the conversation activity is started the JS is not executed, so this methods can't be called anyway
     promise.resolve(true)
   }
 
   @Suppress("unused")
   @ReactMethod
-  fun openChat(
-    userInfos: ReadableMap?,
-    chatOpts: ReadableMap?,
+  fun open(
+    metadata: ReadableMap?,
     promise: Promise
   ) {
     if (!isInit) {
-      promise.reject("OPEN_CHAT_MUST_INIT_SDK", "Call the initialize method first", null)
+      promise.reject("OPEN_MUST_INIT_SDK", "Call the initialize method first", null)
     }
 
-    userInfos?.let {chatUserInfos ->
-      val visitorInfo = VisitorInfo.builder()
-      chatUserInfos.getString("name")?.let { visitorInfo.withName(it) }
-      chatUserInfos.getString("email")?.let { visitorInfo.withEmail(it) }
-      chatUserInfos.getString("phone")?.let { visitorInfo.withPhoneNumber(it) }
+    metadata?.let { notNullMetadata ->
+      val tags = notNullMetadata.getArray("tags")?.toArrayList()?.filterIsInstance<String>()
+      tags?.let { Zendesk.instance.messaging.setConversationTags(it) }
 
-      val chatProfileProvider = Chat.INSTANCE.providers()?.profileProvider()
+      val conversationFields = notNullMetadata.getArray("fields")?.toArrayList()
 
-      chatProfileProvider?.setVisitorInfo(visitorInfo.build(), object : ZendeskCallback<Void>() {
-        override fun onError(error: ErrorResponse?) {
-          promise.reject("OPEN_CHAT_FAILED_TO_SET_VISITOR_INFO", error.toString())
+      conversationFields?.filterIsInstance<Map<String,*>>()?.let { notNullConversationFields ->
+        val conversationFieldsFormatIsValid = notNullConversationFields.all {
+          it.contains("id") && it.contains("value") && it["id"] is String && it["value"] != null
         }
-        override fun onSuccess(result: Void?) {
-          // do nothing
+        if (!conversationFieldsFormatIsValid) {
+          return promise.reject("OPEN_MUST_MALFORMED_CONVERSATION_FIELDS", "`fields` parameter should be of the form [{ id: string, value: String | number | boolean}]")
         }
-      })
 
-      chatUserInfos.getArray("tags")?.let {
-        if (it.size() > 0) {
-          chatProfileProvider?.addVisitorTags(
-            it.toArrayList().filterIsInstance<String>().toMutableList(),
-            object : ZendeskCallback<Void>() {
-              override fun onError(error: ErrorResponse?) {
-                promise.reject("OPEN_CHAT_FAILED_TO_SET_VISITOR_TAGS", error.toString())
-              }
-              override fun onSuccess(result: Void?) {
-                // do nothing
-              }
-            }
-          )
-        }
-      }
-    }
-    val chatConfig = ChatConfiguration.builder()
-
-    chatOpts?.let {
-      if (chatOpts.hasKey("enableAgentAvailability")) {
-        chatConfig.withAgentAvailabilityEnabled(
-          chatOpts.getBoolean("enableAgentAvailability")
-        )
-      }
-      if (chatOpts.hasKey("enablePreChatForm")) {
-        chatConfig.withPreChatFormEnabled(
-          chatOpts.getBoolean("enablePreChatForm")
-        )
-      }
-      if (chatOpts.hasKey("enableTranscript")) {
-        chatConfig.withTranscriptEnabled(
-          chatOpts.getBoolean("enableTranscript")
-        )
-      }
-      if (chatOpts.hasKey("enableOfflineForm")) {
-        chatConfig.withOfflineFormEnabled(
-          chatOpts.getBoolean("enableOfflineForm")
-        )
+        Zendesk.instance.messaging.setConversationFields(notNullConversationFields.associate { Pair(it["id"] as String, it["value"] as Any) })
       }
     }
 
-    val intent = MessagingActivity.builder().withEngines(ChatEngine.engine()).intent(
-      reactApplicationContext,
-      chatConfig.build()
-    )
+    Zendesk.instance.messaging.showMessaging(reactApplicationContext, FLAG_ACTIVITY_NEW_TASK)
 
-    intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK
-    reactApplicationContext.startActivity(intent)
     promise.resolve(true)
   }
 

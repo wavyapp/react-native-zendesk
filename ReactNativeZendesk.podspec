@@ -10,14 +10,13 @@ Pod::Spec.new do |s|
 
   s.authors      = package['author']
   s.homepage     = package['repository']
-  s.platform     = :ios, "12.0"
-  s.ios.deployment_target = '12.0'
+  s.platform     = :ios, "13.0"
+  s.ios.deployment_target = '13.0'
 
   s.source       = { :git => "https://github.com/wavyapp/react-native-zendesk.git", :tag => "v#{s.version}" }
   s.source_files  = "ios/**/*.{h,m,swift}"
 
-  s.dependency 'ZendeskChatSDK', '~> 3.0'
-  s.dependency 'ZendeskSupportSDK', '~> 6.0'
+  s.dependency 'ZendeskSDKMessaging', '~> 2.0'
   # Use install_modules_dependencies helper to install the dependencies if React Native version >=0.71.0.
   # See https://github.com/facebook/react-native/blob/febf6b7f33fdb4904669f99d795eba4c0f95d7bf/scripts/cocoapods/new_architecture.rb#L79.
   if respond_to?(:install_modules_dependencies, true)
