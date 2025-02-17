@@ -3,10 +3,19 @@ import ZendeskSDKMessaging
 import UserNotifications
 
 @objc(ReactNativeZendesk)
-class ReactNativeZendesk: RCTEventEmitter, UNUserNotificationCenterDelegate, UIAdaptivePresentationControllerDelegate {
+class ReactNativeZendesk: RCTEventEmitter, UNUserNotificationCenterDelegate {
   var isInit = false
   var hasEventListeners = false
-
+  
+  class ZendeskMessagingViewController: UIViewController {
+    var onDismiss: (() -> Void)?
+    
+    override func viewDidDisappear(_ animated: Bool) {
+      super.viewDidDisappear(animated)
+      onDismiss?()
+    }
+  }
+  
   override init() {
     super.init()
     let notificationCenter = UNUserNotificationCenter.current()
@@ -18,21 +27,21 @@ class ReactNativeZendesk: RCTEventEmitter, UNUserNotificationCenterDelegate, UIA
       }
     }
   }
-
+  
   override func startObserving() {
     self.hasEventListeners = true
   }
-
+  
   override func stopObserving() {
     self.hasEventListeners = false
   }
-
+  
   override func sendEvent(withName name: String!, body: Any!) {
     if (self.hasEventListeners) {
       super.sendEvent(withName: name, body: body)
     }
   }
-
+  
   override func supportedEvents() -> [String]!
   {
     return [
@@ -46,7 +55,7 @@ class ReactNativeZendesk: RCTEventEmitter, UNUserNotificationCenterDelegate, UIA
       "zendeskMessagingOpened",
     ]
   }
-
+  
   func userNotificationCenter(
     _ center: UNUserNotificationCenter,
     willPresent notification: UNNotification,
@@ -54,7 +63,7 @@ class ReactNativeZendesk: RCTEventEmitter, UNUserNotificationCenterDelegate, UIA
   ) {
     let userInfo = notification.request.content.userInfo
     let shouldBeDisplayed = PushNotifications.shouldBeDisplayed(userInfo)
-
+    
     switch shouldBeDisplayed {
       case .messagingShouldDisplay:
         if
@@ -80,10 +89,10 @@ class ReactNativeZendesk: RCTEventEmitter, UNUserNotificationCenterDelegate, UIA
       @unknown default: break
     }
   }
-
+  
   func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse, withCompletionHandler completionHandler: @escaping () -> Void) {
     let shouldBeDisplayed = PushNotifications.shouldBeDisplayed(response.notification.request.content.userInfo)
-
+    
     switch shouldBeDisplayed {
       case .messagingShouldDisplay:
         PushNotifications.handleTap(response.notification.request.content.userInfo) { viewController in
@@ -94,8 +103,7 @@ class ReactNativeZendesk: RCTEventEmitter, UNUserNotificationCenterDelegate, UIA
             guard let notNilViewController = viewController else {
               return
             }
-            notNilViewController.presentationController?.delegate = self
-            presentedVc.present(notNilViewController, animated: true) {
+            presentedVc.present(self.wrapZendeskVC(notNilViewController), animated: true) {
               self.sendEvent(withName: "zendeskMessagingOpened", body: nil)
             }
           }
@@ -104,15 +112,20 @@ class ReactNativeZendesk: RCTEventEmitter, UNUserNotificationCenterDelegate, UIA
     }
     completionHandler()
   }
-
-  func presentationControllerDidDismiss(_ presentationController: UIPresentationController) {
-    self.sendEvent(withName: "zendeskMessagingClosed", body: nil)
+  
+  func wrapZendeskVC(_ vc: UIViewController) -> UINavigationController {
+    let messagingVCWrapper = ZendeskMessagingViewController()
+    
+    messagingVCWrapper.addChild(vc);
+    messagingVCWrapper.view.addSubview(vc.view)
+    vc.didMove(toParent: messagingVCWrapper)
+    messagingVCWrapper.onDismiss = {
+      self.sendEvent(withName: "zendeskMessagingClosed", body: nil)
+    }
+    
+    return UINavigationController(rootViewController: messagingVCWrapper)
   }
-
-  func presentationControllerShouldDismiss(_ presentationController: UIPresentationController) -> Bool {
-    return true
-  }
-
+  
   func addZendeskEventsObservers() {
     Zendesk.instance?.addEventObserver(self) { event in
       switch event {
@@ -130,9 +143,8 @@ class ReactNativeZendesk: RCTEventEmitter, UNUserNotificationCenterDelegate, UIA
           break
       }
     }
-
   }
-
+  
   @objc
   func initializeSDK(
     _ channelKey: String,
@@ -149,7 +161,7 @@ class ReactNativeZendesk: RCTEventEmitter, UNUserNotificationCenterDelegate, UIA
       }
     }
   }
-
+  
   @objc
   func logUserIn(
     _ JWT: String,
@@ -171,7 +183,7 @@ class ReactNativeZendesk: RCTEventEmitter, UNUserNotificationCenterDelegate, UIA
       }
     }
   }
-
+  
   @objc
   func logUserOut(
     _ resolve: @escaping RCTPromiseResolveBlock,
@@ -189,7 +201,7 @@ class ReactNativeZendesk: RCTEventEmitter, UNUserNotificationCenterDelegate, UIA
       }
     }
   }
-
+  
   @objc
   func close(
     _ resolve: @escaping RCTPromiseResolveBlock,
@@ -205,7 +217,7 @@ class ReactNativeZendesk: RCTEventEmitter, UNUserNotificationCenterDelegate, UIA
       }
     }
   }
-
+  
   @objc
   func open(
     _ metadata: [String:Any]?,
@@ -215,14 +227,14 @@ class ReactNativeZendesk: RCTEventEmitter, UNUserNotificationCenterDelegate, UIA
     guard isInit else {
       return reject("OPEN_MUST_INIT_SDK", "Call the initialize method first", nil)
     }
-
+    
     if let notNilMetadata = metadata {
       if let tags = notNilMetadata["tags"] as? [String] {
         Zendesk.instance?.messaging?.setConversationTags(tags)
       }
       if let conversationFields = notNilMetadata["fields"] as? [[String: AnyHashable]] {
         let conversationFieldsFormatIsValid = conversationFields.allSatisfy { fieldData in fieldData["id"] is String && fieldData["value"] != nil }
-
+        
         guard conversationFieldsFormatIsValid else {
           return reject("OPEN_MUST_MALFORMED_CONVERSATION_FIELDS", "`fields` parameter should be of the form [{ id: string, value: String | number | boolean}]", nil)
         }
@@ -240,8 +252,8 @@ class ReactNativeZendesk: RCTEventEmitter, UNUserNotificationCenterDelegate, UIA
       guard let messagingViewController = Zendesk.instance?.messaging?.messagingViewController() else {
         return reject("OPEN_CANNOT_MESSAGING_VC", "Could not retrieve zendesk messaging view controller", nil)
       }
-      messagingViewController.presentationController?.delegate = self
-      presentedVc.present(messagingViewController, animated: true) {
+      
+      presentedVc.present(self.wrapZendeskVC(messagingViewController), animated: true) {
         self.sendEvent(withName: "zendeskMessagingOpened", body: nil)
         resolve(true)
       }
